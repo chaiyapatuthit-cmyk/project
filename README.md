@@ -1,4 +1,4 @@
-# session_11_framework
+# project_framework
 
 Reusable Databricks ETL framework ที่ implement **Medallion Architecture** (Bronze → Silver → Gold) แบบ config-driven โดยใช้ Python `dataclass` เป็นแกนหลักของ pipeline, พร้อม Data Quality (DQ) check ในชั้น Silver
 
