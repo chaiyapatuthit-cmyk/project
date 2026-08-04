@@ -69,8 +69,6 @@ Raw Files (CSV/JSON/...)
 
 **Helper function:** `get_reason(df)` — ใช้ `.melt()` แปลง flag columns (`_is_xxx_invalid`, `_is_xxx_Null`) ให้เป็น long format แล้วดึงเฉพาะ reason ที่เป็น `True` ออกมาเป็น array
 
-> **ควรทวนสอบ logic:** ใน `get_invalid_df()`, `coalesce(rlike_result, lit(False))` ทำให้ค่า `null` ถูกตีเป็น **invalid** เสมอ ถ้าต้องการให้ null ผ่านได้ (เพราะมี `get_key_null_df` ดักแยกอยู่แล้ว) ควรเปลี่ยนเป็น `coalesce(rlike_result, lit(True))`
-
 ### 3. Gold Layer (ตัวอย่าง script)
 
 Join `fact_sales_silver` กับ `shop_name_silver`, aggregate ยอดขายรายร้าน แล้วเขียนลง `final_result_gold`
