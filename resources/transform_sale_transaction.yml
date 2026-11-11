@@ -15,5 +15,7 @@ resources:
       tasks:
         - task_key: transform
           notebook_task:
-            notebook_path: /Workspace/Users/chaiyapat.uthit@gmail.com/project/project/project_run_pipeline.ipynb
+            notebook_path: /Workspace/Users/chaiyapat.uthit@gmail.com/project/resources/project/project_run_pipeline.py
           environment_key: default
+
+          
