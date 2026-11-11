@@ -15,5 +15,5 @@ resources:
       tasks:
         - task_key: transform
           notebook_task:
-            notebook_path: /Workspace/Users/chaiyapat.uthit@gmail.com/project/project/project_run_pipeline
+            notebook_path: ../src/module_12_framework/gold_layer/gold.py
           environment_key: default
