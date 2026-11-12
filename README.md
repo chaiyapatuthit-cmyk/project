@@ -1,4 +1,4 @@
-# project_framework
+# 1. project_framework
 
 Reusable Databricks ETL framework ที่ implement **Medallion Architecture** (Bronze → Silver → Gold) แบบ config-driven โดยใช้ Python `dataclass` เป็นแกนหลักของ pipeline, พร้อม Data Quality (DQ) check ในชั้น Silver
 
@@ -132,3 +132,162 @@ final_result_df.write.mode("overwrite").saveAsTable("session_11_framework.final_
 - **Databricks** (Unity Catalog)
 - **PySpark** (Structured Streaming + Auto Loader)
 - **Delta Lake**
+
+
+# 2. Unit Test Gold Layer Transform: สรุปยอดขายรายวัน (PySpark)
+
+โปรเจกต์นี้เป็นฟังก์ชัน **Transformation ของชั้น Gold** ในสถาปัตยกรรม Medallion เขียนด้วย PySpark
+ทำหน้าที่นำตารางข้อเท็จจริงยอดขาย (`sales_transaction`) มาเชื่อมกับตารางมิติร้านค้า (`shop_dimension`)
+แล้วสรุปผลเป็นรายวัน พร้อม Unit Test ที่ใช้ `unittest` สำหรับตรวจสอบความถูกต้องของผลลัพธ์
+
+[English version](README.md)
+
+---
+
+## สารบัญ
+
+- [ภาพรวม](#ภาพรวม)
+- [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
+- [รายละเอียดฟังก์ชัน transform](#รายละเอียดฟังก์ชัน-transform)
+- [ตัวอย่าง Input / Output](#ตัวอย่าง-input--output)
+- [การทำงานของ Unit Test](#การทำงานของ-unit-test)
+- [วิธีรันเทส](#วิธีรันเทส)
+
+---
+
+## ภาพรวม
+
+```
+sales_transaction_df ──┐
+                       ├─► LEFT JOIN (shop_id) ─► GROUP BY sales_date ─► ตารางสรุปรายวัน
+shop_dimension_df ─────┘
+```
+
+ฟังก์ชัน `transform` รับ DataFrame 2 ตัว และคืนค่า DataFrame ที่สรุปยอดขายต่อวัน
+เป็นฟังก์ชันบริสุทธิ์ (ไม่อ่าน/เขียนไฟล์เอง) ทำให้เทสง่ายและนำไปใช้ซ้ำใน Pipeline หรือ Databricks Notebook ได้
+
+## โครงสร้างโปรเจกต์
+
+> test_transform_gold
+
+```
+.
+├── logic_packages/
+│   └── gold.py            # ฟังก์ชัน transform
+└── tests/
+    └── test_gold.py       # Unit test
+```
+
+```
+
+---
+
+## รายละเอียดฟังก์ชัน `transform`
+
+```python
+def transform(sales_transaction_df: DataFrame,
+              shop_dimension_df: DataFrame) -> DataFrame:
+```
+
+| พารามิเตอร์ | ชนิด | คำอธิบาย |
+|---|---|---|
+| `sales_transaction_df` | `DataFrame` | ตารางรายการขาย |
+| `shop_dimension_df` | `DataFrame` | ตารางมิติร้านค้า |
+
+### ขั้นตอนการทำงาน
+
+1. **Join:** `sales_transaction_df.join(shop_dimension_df, ['shop_id'], "left")`
+   เชื่อมด้วยคอลัมน์ `shop_id` แบบ left join เพื่อให้ทุกรายการขายยังอยู่ครบ แม้ไม่พบร้านในตารางมิติ
+   การใช้ `['shop_id']` (รายชื่อคอลัมน์) ทำให้ผลลัพธ์มีคอลัมน์ `shop_id` เพียงคอลัมน์เดียว ไม่ซ้ำกัน
+2. **Group:** `.groupBy("sales_date")` จัดกลุ่มตามวันที่ขาย
+3. **Aggregate:** คำนวณ 4 ค่าต่อวัน
+
+| คอลัมน์ผลลัพธ์ | สูตร | ความหมาย |
+|---|---|---|
+| `sales_date` | - | วันที่ขาย (คีย์ของการ group) |
+| `sum_sales` | `floor(sum(sales_amt))` | ยอดขายรวม ปัดเศษลง |
+| `avg_sales` | `floor(avg(sales_amt))` | ยอดขายเฉลี่ยต่อรายการ ปัดเศษลง |
+| `bucket_count` | `count(sales_amt)` | จำนวนรายการขาย (ไม่นับค่า `NULL`) |
+| `max_sales` | `max(sales_amt)` | ยอดขายสูงสุดของรายการเดียวในวันนั้น |
+
+>
+---
+
+## ตัวอย่าง Input / Output
+
+**Input: ตารางยอดขาย**
+
+| transaction_id | shop_id | sales_qty | sales_amt | sales_date |
+|---|---|---|---|---|
+| 1 | 1 | 88 | 5000.02 | 2025-01-01 |
+| 2 | 1 | 94 | 318.44 | 2025-01-01 |
+| 2 | 3 | 32 | 134.48 | 2025-01-01 |
+| 3 | 2 | 25 | 8001.32 | 2025-12-01 |
+| 4 | 2 | 7 | 205.12 | 2025-12-01 |
+| 5 | 2 | 98 | 4959.73 | 2025-12-31 |
+| 6 | 2 | 100 | 6000.25 | 2025-12-31 |
+
+**Output: สรุปรายวัน**
+
+| sales_date | sum_sales | avg_sales | bucket_count | max_sales |
+|---|---|---|---|---|
+| 2025-01-01 | 5452 | 1817 | 3 | 5000.02 |
+| 2025-12-01 | 8206 | 4103 | 2 | 8001.32 |
+| 2025-12-31 | 10959 | 5479 | 2 | 6000.25 |
+
+ตัวอย่างการคำนวณของวันที่ 2025-01-01:
+ผลรวม = 5000.02 + 318.44 + 134.48 = 5452.94 → `floor` ได้ **5452**
+ค่าเฉลี่ย = 5452.94 / 3 ≈ 1817.65 → `floor` ได้ **1817**
+
+---
+
+## การทำงานของ Unit Test
+
+ไฟล์เทสใช้ `unittest` โดยมีส่วนประกอบดังนี้
+
+### 1. การ import แบบมี Fallback
+
+```python
+try:
+    from logic_packages.gold import transform
+except ImportError:
+    ...  # เพิ่ม project_root เข้า sys.path แล้ว import ใหม่
+```
+
+พยายาม import ตรง ๆ ก่อน (เช่นรันบน Databricks หรือติดตั้งเป็นแพ็กเกจแล้ว)
+ถ้าไม่ได้ จะหา `project_root` จากตำแหน่งไฟล์เทส แล้วเพิ่มเข้า `sys.path` เพื่อให้ import ได้เมื่อรันบนเครื่อง local
+
+### 2. `setUpClass` / `tearDownClass`
+
+- `setUpClass`: สร้าง `SparkSession` แบบ `local[1]` (ใช้ 1 core) ถ้าสร้างไม่สำเร็จ
+  (เช่นรันใน Databricks ที่มีตัวแปร `spark` อยู่แล้ว) จะ fallback ไปใช้ `spark` ที่มีอยู่
+- `tearDownClass`: หยุด SparkSession หลังเทสทั้งคลาสจบ
+
+### 3. `test_apply_function`
+
+1. สร้าง `fact_sales_df` และ `shop_df` จากข้อมูลจำลองพร้อม Schema ที่กำหนดเอง
+2. กำหนด `expected_schema` และ `expected_data` ซึ่งเป็นผลลัพธ์ที่คาดหวัง
+3. เรียก `transform(...)` เพื่อได้ผลลัพธ์จริง
+4. **เรียงลำดับด้วย `sales_date` ทั้งสองฝั่ง** ก่อน `collect()` เพราะ `groupBy` ไม่รับประกันลำดับแถว
+5. เปรียบเทียบด้วย `assertEqual` ว่าผลจริงตรงกับที่คาดหวัง
+
+---
+
+## วิธีรันเทส
+
+จากโฟลเดอร์รากของโปรเจกต์:
+
+```bash
+# แบบ unittest
+python -m unittest discover -s tests -v
+
+# หรือรันไฟล์เดียว
+python tests/test_gold.py
+```
+
+บน Databricks สามารถรันไฟล์เทสใน Notebook ได้โดยตรง
+(โค้ดจะใช้ `spark` ที่มีอยู่แล้วผ่านกลไก fallback)
+
+---
+
+
